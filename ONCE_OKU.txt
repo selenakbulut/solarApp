@@ -1,0 +1,13 @@
+﻿STAJYER PAKETİ - ÖNCE OKUYUN
+
+1. ZIP'in tamamını yeni, boş bir klasöre çıkarın. BAT dosyalarını ZIP'in içinden çalıştırmayın.
+2. Bilgisayarda Python 3.12 ve Node.js 22.12 veya daha yeni sürüm bulunmalı.
+3. İlk sefer kurulum.bat çalıştırın. Bağımlılıklar için internet bağlantısı gerekir.
+4. Uygulamayı açmak için baslat.bat kullanın. İki terminal açmanız gerekmez.
+5. Kapatmak için durdur.bat, servis durumunu görmek için durum.bat kullanın.
+
+Normal başlangıç paketteki gerçek solar.db veritabanına bağlanır.
+Teknik geçişin ayrıntıları changes.md, kullanım ve ayarlar README.md içindedir.
+
+.venv, node_modules, süreç kayıtları ve geçici önizleme verileri bu pakette yoktur.
+Kurulum, gerekli ortamı bu bilgisayarda oluşturur. Eski projeyle dosyaları karıştırmayın.
