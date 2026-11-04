@@ -19,3 +19,4 @@ web/dist/
 .hallmark/screenshots/
 web/.hallmark/shots/
 .graphify_cache/
+*.sqbpro
