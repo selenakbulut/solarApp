@@ -60,15 +60,25 @@ class WeatherRepository:
     def save_hours(self, key, site_id, rows, elevation=None):
         with transaction(self.db_path) as connection:
             connection.executemany("""
-                INSERT OR IGNORE INTO weather_cache_hours
+                INSERT INTO weather_cache_hours
                 (kind, latitude, longitude, timezone, tilt, azimuth, weather_time,
                  temperature, wind_speed, cloud_cover, shortwave_radiation,
                  tilted_radiation, fetched_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(kind, latitude, longitude, timezone, tilt, azimuth, weather_time)
+                DO UPDATE SET
+                    temperature=excluded.temperature, wind_speed=excluded.wind_speed,
+                    cloud_cover=excluded.cloud_cover,
+                    shortwave_radiation=excluded.shortwave_radiation,
+                    tilted_radiation=excluded.tilted_radiation, fetched_at=excluded.fetched_at
+                WHERE julianday(excluded.fetched_at) >= julianday(weather_cache_hours.fetched_at)
+                   OR julianday(weather_cache_hours.fetched_at) IS NULL
             """, [(*key, *(row[name] for name in (
                 'weather_time', 'temperature', 'wind_speed', 'cloud_cover',
                 'shortwave_radiation', 'tilted_radiation', 'fetched_at'
             ))) for row in rows])
+            # Preserve legacy inputs used by saved runs without forecast_hour_inputs.
+            # The authoritative renewable cache is weather_cache_hours above.
             if key[0] == 'forecast':
                 connection.executemany("""
                     INSERT OR IGNORE INTO weather_data

@@ -6,6 +6,7 @@ from ..errors import NotFoundError
 from ..schemas import ForecastCreate
 from ..services.comparison import daily_summary
 from ..services.exports import forecast_export
+from ..services.kentpark_candidate import candidate_preview
 
 router = APIRouter(tags=['Tahminler'])
 PositiveId = Annotated[int, Path(gt=0)]
@@ -50,6 +51,13 @@ def export_forecast(run_id: PositiveId, request: Request, format: Literal['csv',
     media = 'text/csv; charset=utf-8' if format == 'csv' else 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     return Response(content=content, media_type=media,
                     headers={'Content-Disposition': f'attachment; filename="forecast_{run_id}.{format}"'})
+
+
+@router.get('/forecasts/{run_id}/kentpark-candidate')
+def preview_kentpark_candidate(run_id: PositiveId, request: Request):
+    forecast = request.app.state.runs.get(run_id)
+    meter_rows = request.app.state.actuals.list(forecast['run']['site_id'])
+    return candidate_preview(forecast, meter_rows)
 
 
 @router.get('/scenarios/compare')

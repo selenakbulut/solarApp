@@ -1,6 +1,7 @@
 import math
 import threading
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -15,6 +16,25 @@ FIELDS = {
     'cloud_cover': 'cloud_cover', 'shortwave_radiation': 'shortwave_radiation',
     'tilted_radiation': 'global_tilted_irradiance',
 }
+
+FORECAST_CACHE_TTL = timedelta(hours=6)
+ARCHIVE_CACHE_TTL = timedelta(hours=24)
+RECENT_ARCHIVE_DAYS = 7
+
+
+def _needs_refresh(row, kind, now, local_today):
+    production_day = (datetime.fromisoformat(row['weather_time']) - timedelta(hours=1)).date()
+    if kind != 'forecast' and production_day < local_today - timedelta(days=RECENT_ARCHIVE_DAYS):
+        return False
+    try:
+        fetched = datetime.fromisoformat(row['fetched_at'])
+        if fetched.tzinfo is None:
+            return True
+    except (KeyError, TypeError, ValueError):
+        return True
+    age = now - fetched
+    ttl = FORECAST_CACHE_TTL if kind == 'forecast' else ARCHIVE_CACHE_TTL
+    return age < timedelta(0) or age >= ttl
 
 
 def utc_now():
@@ -74,7 +94,10 @@ class WeatherService:
         key = (kind, site['latitude'], site['longitude'], site['timezone'], site['tilt'], site['azimuth'])
         with self.lock:
             cached = self.repo.read_hours(key, expected[0], expected[-1])
-            present = {row['weather_time'] for row in cached}
+            now = self.clock()
+            local_today = now.astimezone(ZoneInfo(site['timezone'])).date()
+            present = {row['weather_time'] for row in cached
+                       if not _needs_refresh(row, kind, now, local_today)}
             missing_days = sorted({hour[:10] for hour in expected if hour not in present})
             source = 'cache'
             for first_day, last_day in _consecutive_days(missing_days):
@@ -86,7 +109,9 @@ class WeatherService:
                 }
                 payload = self.request_json(
                     FORECAST_URL if kind == 'forecast' else ARCHIVE_URL,
-                    params, _validate_weather,
+                    params, lambda payload: _validate_requested_weather(
+                        payload, [hour for hour in expected
+                                  if first_day <= hour[:10] <= last_day]),
                 )
                 fetched_at = self.clock().isoformat()
                 hourly = payload['hourly']
@@ -103,6 +128,13 @@ class WeatherService:
                 raise WeatherError("Hava yanıtında istenen saatlerin tamamı bulunamadı.")
             self.repo.save_hours(key, site['id'], result)
             return result, source
+
+
+def _validate_requested_weather(payload, expected):
+    payload = _validate_weather(payload)
+    if not set(expected).issubset(payload['hourly']['time']):
+        raise ValueError("Yenilenen hava yanıtında istenen saatler eksik; eski veri güncel sayılmadı.")
+    return payload
 
 
 def _validate_weather(payload):

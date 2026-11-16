@@ -12,10 +12,10 @@ class ForecastRepository:
     def __init__(self, db_path):
         self.db_path = db_path
 
-    def save(self, site, hourly, losses, coefficient, source):
+    def save(self, site, hourly, losses, coefficient, source, *, model_version='v1.0'):
         created_at = datetime.now(timezone.utc).isoformat(timespec='seconds')
         columns = ('site_id', 'created_at', 'model_version', *PARAMETERS, *LOSS_COLUMNS, 'mounting_type')
-        values = (site['id'], created_at, 'v1.0', *(site[key] for key in PARAMETERS),
+        values = (site['id'], created_at, model_version, *(site[key] for key in PARAMETERS),
                   *(losses[key] if losses else None for key in LOSS_COLUMNS), site.get('mounting_type'))
         with transaction(self.db_path) as connection:
             cursor = connection.execute(

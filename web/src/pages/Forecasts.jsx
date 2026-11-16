@@ -51,6 +51,50 @@ function ForecastForm({ site, onClose, onCreated }) {
   </Panel>;
 }
 
+function KentparkForecastAccuracy({ runId }) {
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState('hourly');
+  const preview = useApi(open ? `/forecasts/${runId}/kentpark-candidate` : null);
+  const data = preview.data;
+  const daily = mode === 'daily';
+  const matched = data?.hourly.filter(row => row.actual_energy_kwh != null) ?? [];
+  const mae = matched.length
+    ? matched.reduce((total, row) => total + Math.abs(row.selected_energy_kwh - row.actual_energy_kwh), 0) / matched.length
+    : null;
+  return <details className="details" onToggle={event => setOpen(event.currentTarget.open)}>
+    <summary><SlidersHorizontal size={16} />Kentpark tahmin başarısı</summary>
+    <div className="details-content stack">
+      {preview.loading && <Loading />}
+      {preview.error && <ErrorState error={preview.error} onRetry={preview.reload} />}
+      {data && <>
+        {!data.saved_monthly && data.hourly.some(row => row.monthly_candidate_energy_kwh != null) &&
+          <p className="muted">Bu kaydın hava verileriyle hesaplanan eski Kentpark deneyinin sonucu gösteriliyor.</p>}
+        <p className="muted">{mae == null
+          ? 'Bu saatler için sayaç verisi bekleniyor.'
+          : `${matched.length} eşleşen saatte ortalama mutlak hata (MAE) ${number(mae, 2)} kWh.`}</p>
+        <EnergyChart data={data.hourly} height={240} series={[
+          { key: 'selected_energy_kwh', label: 'Üretim tahmini', color: 'var(--color-energy)' },
+          ...(matched.length ? [{ key: 'actual_energy_kwh', label: 'Gerçek üretim', color: 'var(--color-accent)' }] : []),
+        ]} />
+        <div className="panel-heading">
+          <h2>Tahmin başarı oranı</h2>
+          <Tabs value={mode} onChange={setMode} label="Başarı oranı görünümü" options={[{ value: 'hourly', label: 'Saatlik' }, { value: 'daily', label: 'Günlük' }]} />
+        </div>
+        {daily && <p className="muted">Günlük karşılaştırma eşleşen saatlerin toplamıyla yapılır. Eşleşme yoksa günün tahmin toplamı gösterilir. 00:00 bitişli saat önceki üretim gününe dahildir.</p>}
+        <DataTable key={`${runId}-${mode}`} rows={daily ? data.daily : data.hourly} columns={[
+          daily ? 'date' : 'forecast_time',
+          { key: 'selected_energy_kwh', label: 'Tahmini üretim (kWh)' },
+          { key: 'actual_energy_kwh', label: 'Gerçek üretim (kWh)' },
+          { key: 'selected_success_percent', label: 'Başarı (%)', render: value => value == null
+            ? <span className="muted">Veri yok</span> : `%${number(value, 2)}` },
+          ...(daily ? [{ key: 'matched_hours', label: 'Eşleşen saat', render: (value, row) => `${value} / ${row.forecast_hours}` }] : []),
+        ]} caption={daily ? 'Günlük tahmin başarı oranı' : 'Saatlik tahmin başarı oranı'} />
+        <p className="muted">Başarı yüzdesi, tahmin ve gerçek üretimden küçük olanın büyük olana oranıdır. İki değer de sıfırsa %100, biri sıfırsa %0 gösterilir. Gerçek üretim kaydı eksikse yüzde hesaplanmaz.</p>
+      </>}
+    </div>
+  </details>;
+}
+
 function ForecastResult({ result, site, onNavigate }) {
   const [view, setView] = useState('hourly');
   const [chartDay, setChartDay] = useState('all');
@@ -95,6 +139,8 @@ function ForecastResult({ result, site, onNavigate }) {
       <div><span>Panel eğimi / azimut</span><strong>{number(run.tilt, 0)}° / {number(run.azimuth, 0)}°</strong></div>
       <button className="text-link" onClick={() => onNavigate('sites')}>Santral ayrıntıları<ArrowUpRight size={16} /></button>
     </div>
+    {run.site_id === 13 && metadata.source === 'forecast'
+      && <KentparkForecastAccuracy key={run.id} runId={run.id} />}
     <Panel title="Üretim verileri" description="Saatlik sonuçları ve günlük toplamları inceleyin." action={<Tabs value={view} onChange={setView} options={[{ value: 'hourly', label: 'Saatlik' }, { value: 'daily', label: 'Günlük' }]} />}>
       <DataTable key={view} rows={view === 'hourly' ? hourly : daily} columns={view === 'hourly' ? ['forecast_time', 'predicted_energy_kwh', 'average_power_kw', 'tilted_radiation', 'temperature', 'clipping_loss_kwh'] : ['date', 'predicted_energy_kwh', 'peak_power_kw', 'clipping_loss_kwh', 'hour_count', 'complete_day']} caption={view === 'hourly' ? 'Saatlik üretim sonuçları' : 'Günlük üretim özeti'} />
     </Panel>

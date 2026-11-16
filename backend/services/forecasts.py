@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from functools import partial
 import math
 from zoneinfo import ZoneInfo
 
@@ -6,6 +7,7 @@ from ..errors import QuotaError, WeatherError
 from ..model import calculate_production
 from ..repositories.forecasts import ForecastRepository, PARAMETERS
 from ..repositories.sites import SiteRepository
+from .production_adjustments import GENERAL_MODEL_VERSION, hourly_energy_factor
 from .timezones import site_timezone
 
 
@@ -71,17 +73,24 @@ class ForecastService:
                 return result
             raise
         hourly = []
-        for row in weather:
-            energy, clipping = calculate_production(
-                radiation=row['tilted_radiation'], air_temp=row['temperature'],
-                dc_power_kwp=dc_power, inverter_power_kw=site['ac_power_kw'],
-                panel_age_years=site['site_age_years'],
-                temperature_coefficient=request.temperature_coefficient, **(losses or {}),
-            )
+        weather_by_end = {datetime.fromisoformat(row['weather_time']): row for row in weather}
+        calculate_energy = partial(
+            calculate_production,
+            dc_power_kwp=dc_power, inverter_power_kw=site['ac_power_kw'],
+            panel_age_years=site['site_age_years'],
+            temperature_coefficient=request.temperature_coefficient, **(losses or {}),
+        )
+        for hour_end, row in weather_by_end.items():
+            energy, clipping = calculate_energy(row['tilted_radiation'], row['temperature'])
+            if energy > 0:
+                energy *= hourly_energy_factor(site, hour_end, weather_by_end)
             hourly.append({**row, 'forecast_time': row['weather_time'],
                            'predicted_energy_kwh': energy, 'clipping_loss_kwh': clipping,
                            'cell_temperature': row['temperature'] + (45 - 20) / 800 * row['tilted_radiation']})
-        run_id = self.runs.save(site, hourly, losses, request.temperature_coefficient, request.source)
+        run_id = self.runs.save(
+            site, hourly, losses, request.temperature_coefficient, request.source,
+            model_version=GENERAL_MODEL_VERSION,
+        )
         result = self.runs.get(run_id)
         result['weather_access'] = cache_source
         return result
