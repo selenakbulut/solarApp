@@ -7,6 +7,7 @@ from .comparison import daily_summary
 
 def forecast_export(forecast, kind):
     hourly = pd.DataFrame(forecast['hourly'])
+    hourly['weather_fetched_at'] = (forecast.get('metadata') or {}).get('weather_fetched_at')
     if kind == 'csv':
         return hourly.to_csv(index=False).encode('utf-8-sig')
     output = BytesIO()

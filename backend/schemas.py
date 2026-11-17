@@ -67,19 +67,22 @@ class ForecastCreate(InputModel):
     azimuth: FiniteFloat | None = Field(default=None, ge=-180, le=180)
     temperature_coefficient: FiniteFloat = Field(default=-0.004, ge=-0.02, le=0)
     source: Literal["forecast", "historical"] = "forecast"
+    refresh_weather: bool = False
     forecast_days: int = Field(default=3, ge=1, le=7)
     start_date: date | None = None
     end_date: date | None = None
 
     @model_validator(mode="after")
     def valid_dates(self):
-        if self.source == "historical":
-            if self.start_date is None or self.end_date is None:
-                raise ValueError("Geçmiş hesaplama için iki tarih de gerekli.")
-            if not 0 <= (self.end_date - self.start_date).days < 366:
-                raise ValueError("Tarih aralığı 1–366 gün olmalı.")
-        elif self.start_date is not None or self.end_date is not None:
-            raise ValueError("Tarih seçimi yalnızca historical kaynağında kullanılabilir.")
+        if self.refresh_weather and self.source != "forecast":
+            raise ValueError("Zorunlu hava yenilemesi yalnızca ileri tahminde kullanılabilir.")
+        if self.source == "forecast" and self.start_date is None and self.end_date is None:
+            return self
+        if self.start_date is None or self.end_date is None:
+            raise ValueError("Başlangıç ve bitiş tarihlerini birlikte seçin.")
+        max_days = 366 if self.source == "historical" else 7
+        if not 0 <= (self.end_date - self.start_date).days < max_days:
+            raise ValueError(f"Tarih aralığı 1–{max_days} gün olmalı.")
         return self
 
 

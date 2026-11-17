@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, Download, ChevronDown, X, Sun, Zap, CalendarDays, Clock3, ArrowUpRight, SlidersHorizontal, Info, MapPin, Layers3 } from 'lucide-react';
+import { Plus, Download, ChevronDown, X, Sun, Zap, Clock3, ArrowUpRight, SlidersHorizontal, Info, MapPin, Layers3 } from 'lucide-react';
 import { api, useApi, number, dateLabel, createdLabel, sourceLabel, runLabel } from '../api';
 import { Button, Notice, Empty, Loading, ErrorState, Field, Panel, PageHeading, Metric, Tabs, DataTable } from '../components/ui';
 import { EnergyChart } from '../components/Charts';
@@ -14,17 +14,26 @@ function ForecastForm({ site, onClose, onCreated }) {
   const [source, setSource] = useState('forecast');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const historical = source === 'historical';
+  const earliestDate = historical ? undefined : localDate(0, site.timezone);
+  const latestDate = localDate(historical ? -2 : 7, site.timezone);
   async function submit(event) {
     event.preventDefault(); setError(null);
     const form = new FormData(event.currentTarget);
-    const body = { site_id: site.id, source, forecast_days: Number(form.get('forecast_days') || 3) };
+    const body = {
+      site_id: site.id, source,
+      start_date: form.get('start_date'),
+      end_date: form.get('end_date'),
+    };
+    if (!historical && form.has('refresh_weather')) body.refresh_weather = true;
+
     for (const key of ['panel_count', 'panel_power_wp', 'ac_power_kw', 'tilt', 'azimuth', 'site_age_years']) body[key] = Number(form.get(key));
     body.temperature_coefficient = Number(form.get('coefficient')) / 100;
     const ratio = body.panel_count * body.panel_power_wp / 1000 / body.ac_power_kw;
     if (ratio < 0.8 || ratio > 1.5) { setError('DC/AC oranı 0,8 ile 1,5 arasında olmalı. Panel sayısı, panel gücü ve AC gücü kontrol edin.'); return; }
-    if (source === 'historical') {
-      body.start_date = form.get('start_date'); body.end_date = form.get('end_date');
-      if (body.start_date > body.end_date) { setError('Bitiş tarihi başlangıç tarihinden önce olamaz.'); return; }
+    if (body.start_date > body.end_date) {
+      setError('Bitiş tarihi başlangıç tarihinden önce olamaz.');
+      return;
     }
     setBusy(true);
     try { const result = await api('/forecasts', { method: 'POST', body }); onCreated(result); }
@@ -34,7 +43,19 @@ function ForecastForm({ site, onClose, onCreated }) {
     <form onSubmit={submit} className="stack">
       <fieldset disabled={busy} className="form-fieldset stack">
         <Tabs value={source} onChange={setSource} options={[{ value: 'forecast', label: 'İleri tahmin' }, { value: 'historical', label: 'Geçmiş hava ile hesaplama' }]} label="Hesaplama türü" />
-        {source === 'forecast' ? <div className="form-grid"><Field label="Tahmin aralığı"><select name="forecast_days" defaultValue="3">{[1, 2, 3, 4, 5, 6, 7].map(n => <option key={n} value={n}>{n} gün / {n * 24} saat</option>)}</select></Field><div className="field-explanation"><CalendarDays size={20} /><p>İlk aralık yarın 00:00'da başlar. Mevcut hava önbelleği uygunsa yeniden kullanılır.</p></div></div> : <><div className="form-grid"><Field label="Başlangıç tarihi"><input type="date" name="start_date" defaultValue={localDate(-10, site.timezone)} max={localDate(-2, site.timezone)} required /></Field><Field label="Bitiş tarihi"><input type="date" name="end_date" defaultValue={localDate(-8, site.timezone)} max={localDate(-2, site.timezone)} required /></Field></div><Notice>Geçmiş hava koşullarından hesaplanır; geçmişte yapılmış bir ileri tahmin değildir. Son tamamlanmış günler arşivde henüz bulunmayabilir.</Notice></>}
+        <div className="form-grid" key={source}>
+          <Field label="Başlangıç tarihi"><input type="date" name="start_date" defaultValue={localDate(historical ? -10 : 1, site.timezone)} min={earliestDate} max={latestDate} required /></Field>
+          <Field label="Bitiş tarihi"><input type="date" name="end_date" defaultValue={localDate(historical ? -8 : 3, site.timezone)} min={earliestDate} max={latestDate} required /></Field>
+        </div>
+        {historical
+          ? <Notice>Geçmiş hava koşullarından hesaplanır. Son tamamlanmış günler arşivde henüz bulunmayabilir.</Notice>
+          : <p className="muted">Başlangıç bugünse tahmin, henüz başlamamış ilk saatlik aralıktan itibaren oluşturulur.</p>}
+        {!historical && (
+            <label className="checkbox-row">
+              <input type="checkbox" name="refresh_weather" />
+              <span>Open-Meteo’dan güncel hava verisi çek</span>
+            </label>
+        )}
         <details className="details" open><summary><SlidersHorizontal size={16} />Teknik parametreler<span>Santral değerleriyle dolduruldu</span></summary><div className="form-grid form-grid-3 details-content">
           <Field label="Panel sayısı"><input name="panel_count" type="number" min="1" step="1" defaultValue={site.panel_count || 20} required /></Field>
           <Field label="Panel gücü (Wp)"><input name="panel_power_wp" type="number" min="0.01" step="any" defaultValue={site.panel_power_wp || 500} required /></Field>
@@ -163,6 +184,7 @@ export function ForecastsPage({ site, onNavigate, revision = 0, onForecastCreate
   const available = runs.data || [];
   const runId = available.some(r => r.id === activeRun) ? activeRun : available[0]?.id;
   const result = useApi(runId ? `/forecasts/${runId}` : null, version);
+  const displayedRun = result.data?.run?.id === runId ? result.data : null;
   function selectRun(id) { setActiveRun(id); const url = new URL(location.href); url.searchParams.set('run', id); history.replaceState({}, '', url); setMessage(null); }
   function created(data) {
     setVersion(v => v + 1); selectRun(data.run.id); setFormOpen(false);
@@ -175,7 +197,12 @@ export function ForecastsPage({ site, onNavigate, revision = 0, onForecastCreate
       {message && <Notice tone={message.tone}>{message.text}</Notice>}
       {runs.error ? <ErrorState error={runs.error} onRetry={runs.reload} /> : runs.loading ? <Loading /> : !available.length ? <Empty title="Henüz kayıtlı tahmin yok" action={!formOpen && <Button variant="primary" onClick={() => setFormOpen(true)}>İlk tahmini oluştur</Button>}>Santral bilgileri hazır. Bir tarih aralığı seçerek ilk üretim tahmininizi oluşturun.</Empty> : <>
         <div className="forecast-toolbar"><div className="run-selector"><Field label="Kayıtlı tahmin"><select value={runId} onChange={e => selectRun(Number(e.target.value))}>{available.map(run => <option key={run.id} value={run.id}>{runLabel(run)}</option>)}</select></Field><span className="badge badge-green">{sourceLabel(available.find(r => r.id === runId)?.source)}</span></div><details className="export-menu"><summary className="button button-secondary"><Download size={16} />Dışa aktar<ChevronDown size={14} /></summary><div className="export-options"><a href={`/api/forecasts/${runId}/export?format=csv`} download>CSV indir<span>Saatlik sonuçlar</span></a><a href={`/api/forecasts/${runId}/export?format=xlsx`} download>Excel indir<span>Sonuçlar, özet ve parametreler</span></a></div></details></div>
-        <div className="run-meta"><span><Clock3 size={14} />{createdLabel(available.find(r => r.id === runId)?.created_at)}</span><span>Kayıt #{runId}</span><span>{available.length} kayıtlı sürüm</span><span className="run-meta-note">Son kayıt, güncel hava garantisi değildir.</span></div>
+        <div className="run-meta">
+          <span><Clock3 size={14} />Tahmin oluşturuldu {createdLabel(available.find(r => r.id === runId)?.created_at)}</span>
+          <span>Kayıt #{runId}</span>
+          <span>{available.length} kayıtlı sürüm</span>
+          {displayedRun && <span className="run-meta-note">Hava verisi çekimi (en eski, TSİ) {createdLabel(displayedRun.metadata?.weather_fetched_at)}</span>}
+        </div>
         {result.loading ? <Loading rows={6} /> : result.error ? <ErrorState error={result.error} onRetry={result.reload} /> : result.data && <ForecastResult key={runId} result={result.data} site={site} onNavigate={onNavigate} />}
         <details className="details"><summary><Layers3 size={17} />Tüm tahmin sürümleri<span>{available.length} kayıt</span></summary><DataTable rows={available} columns={['id', 'created_at', 'source', 'tilt', 'azimuth', 'hour_count']} caption="Kayıtlı tahmin sürümleri" /></details>
       </>}

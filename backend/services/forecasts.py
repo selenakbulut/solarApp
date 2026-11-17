@@ -40,23 +40,44 @@ class ForecastService:
         if not 0.8 <= dc_power / site['ac_power_kw'] <= 1.5:
             raise ValueError("DC/AC oranı 0.8–1.5 arasında olmalı.")
         site['timezone'] = site_timezone(site)
-        today = self.weather.clock().astimezone(ZoneInfo(site['timezone'])).date()
+        local_now = self.weather.clock().astimezone(ZoneInfo(site['timezone'])).replace(tzinfo=None)
+        today = local_now.date()
         if request.source == 'historical':
             start, end = request.start_date, request.end_date
             if end >= today - timedelta(days=1):
                 raise ValueError("Arşiv hesabında bitiş en geç önceki günün bir gün öncesi olmalı.")
+        elif request.start_date is not None:
+            start, end = request.start_date, request.end_date
+            if start < today or end > today + timedelta(days=7):
+                raise ValueError("İleri tahmin tarihleri bugün ile 7 gün sonrası arasında olmalı.")
         else:
             start = today + timedelta(days=1)
-            end = start + timedelta(days=request.forecast_days - 1)
-        expected = interval_labels(start, end)
+            end = today + timedelta(days=request.forecast_days)
+        weather_hours = interval_labels(start, end)
+        expected = weather_hours
+        if request.source == 'forecast' and start == today:
+            first_interval = local_now.replace(minute=0, second=0, microsecond=0)
+            if first_interval < local_now:
+                first_interval += timedelta(hours=1)
+            first_label = (first_interval + timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M')
+            expected = [stamp for stamp in weather_hours if stamp >= first_label]
+            if not expected:
+                raise ValueError("Seçilen tarihte henüz başlamamış saatlik aralık kalmadı.")
         losses = self.sites.losses(site['id'])
         try:
-            weather, cache_source = self.weather.ensure_hours(site, request.source, expected)
+            weather, cache_source = self.weather.ensure_hours(
+                site, request.source, weather_hours, refresh_weather=request.refresh_weather,
+            )
         except (WeatherError, QuotaError) as error:
-            if request.source != 'forecast':
+            if request.source != 'forecast' or request.refresh_weather:
                 raise
             for old in self.runs.list(site['id']):
                 if old['source'] == 'historical':
+                    continue
+                if request.start_date is not None and (
+                    old['first_time'] != expected[0] or old['last_time'] != expected[-1]
+                    or old['hour_count'] != len(expected)
+                ):
                     continue
                 if any(old[key] != site[key] for key in PARAMETERS):
                     continue
@@ -80,7 +101,9 @@ class ForecastService:
             panel_age_years=site['site_age_years'],
             temperature_coefficient=request.temperature_coefficient, **(losses or {}),
         )
-        for hour_end, row in weather_by_end.items():
+        for stamp in expected:
+            hour_end = datetime.fromisoformat(stamp)
+            row = weather_by_end[hour_end]
             energy, clipping = calculate_energy(row['tilted_radiation'], row['temperature'])
             if energy > 0:
                 energy *= hourly_energy_factor(site, hour_end, weather_by_end)

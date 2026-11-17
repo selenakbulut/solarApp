@@ -23,13 +23,14 @@ RECENT_ARCHIVE_DAYS = 7
 
 
 def _needs_refresh(row, kind, now, local_today):
+    # Labels mark interval ends: midnight belongs to the preceding production day.
     production_day = (datetime.fromisoformat(row['weather_time']) - timedelta(hours=1)).date()
     if kind != 'forecast' and production_day < local_today - timedelta(days=RECENT_ARCHIVE_DAYS):
         return False
     try:
         fetched = datetime.fromisoformat(row['fetched_at'])
         if fetched.tzinfo is None:
-            return True
+            return True  # Unknown timezone: do not guess the age of a legacy timestamp.
     except (KeyError, TypeError, ValueError):
         return True
     age = now - fetched
@@ -90,16 +91,17 @@ class WeatherService:
             self.repo.save_location(query, result, self.clock())
             return result
 
-    def ensure_hours(self, site, kind, expected):
+    def ensure_hours(self, site, kind, expected, *, refresh_weather=False):
         key = (kind, site['latitude'], site['longitude'], site['timezone'], site['tilt'], site['azimuth'])
         with self.lock:
-            cached = self.repo.read_hours(key, expected[0], expected[-1])
+            cached = [] if refresh_weather else self.repo.read_hours(key, expected[0], expected[-1])
             now = self.clock()
             local_today = now.astimezone(ZoneInfo(site['timezone'])).date()
             present = {row['weather_time'] for row in cached
                        if not _needs_refresh(row, kind, now, local_today)}
             missing_days = sorted({hour[:10] for hour in expected if hour not in present})
             source = 'cache'
+            refreshed = {}
             for first_day, last_day in _consecutive_days(missing_days):
                 params = {
                     'latitude': site['latitude'], 'longitude': site['longitude'],
@@ -122,7 +124,11 @@ class WeatherService:
                 if not isinstance(elevation, (int, float)) or not math.isfinite(elevation):
                     elevation = None
                 self.repo.save_hours(key, site['id'], rows, elevation)
+                if refresh_weather:
+                    refreshed.update((row['weather_time'], row) for row in rows)
                 source = 'open_meteo'
+            if refresh_weather:
+                return [refreshed[stamp] for stamp in expected], source
             result = self.repo.read_hours(key, expected[0], expected[-1])
             if [row['weather_time'] for row in result] != expected:
                 raise WeatherError("Hava yanıtında istenen saatlerin tamamı bulunamadı.")
