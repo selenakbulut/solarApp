@@ -55,7 +55,8 @@ def save_forecast(path, slot, result):
 
 def log(output, slot, site_id, message):
     timestamp = datetime.now(ISTANBUL).isoformat(timespec='seconds')
-    line = f'{timestamp} | Plan {slot:%d.%m %H:%M} | {SITE_NAMES[site_id]} | {message}'
+    label = SITE_NAMES[site_id] if site_id is not None else 'Zamanlayıcı'
+    line = f'{timestamp} | Plan {slot:%d.%m %H:%M} | {label} | {message}'
     print(line, flush=True)
     with (output / 'cekimler.log').open('a', encoding='utf-8') as stream:
         stream.write(line + '\n')
@@ -106,21 +107,28 @@ def main():
         parser.error('İlk çekimde tahmin aralığı en fazla 7 gün olabilir.')
 
     if args.dry_run:
+        site_names = ', '.join(SITE_NAMES[site_id] for site_id in SITE_IDS)
         for slot in schedule(args.first_evening, args.last_morning):
-            print(f'{slot:%Y-%m-%d %H:%M} TSİ | {slot.date()} – {args.forecast_end} | Biska, Kentpark')
+            print(f'{slot:%Y-%m-%d %H:%M} TSİ | {slot.date()} – {args.forecast_end} | {site_names}')
         return
 
     api(args.api, '/health')
     args.output.mkdir(parents=True, exist_ok=True)
+    started_at = datetime.now(ISTANBUL)
     for slot in schedule(args.first_evening, args.last_morning):
+        deadline = slot + timedelta(minutes=5)
+        if started_at > deadline:
+            continue
         now = datetime.now(ISTANBUL)
         if now < slot:
-            print(f'Sıradaki çekim {slot:%d.%m.%Y %H:%M} TSİ', flush=True)
+            log(args.output, slot, None, 'Çekim saati bekleniyor.')
             while now < slot:
                 sleep(min(60, (slot - now).total_seconds()))
                 now = datetime.now(ISTANBUL)
-        if now <= slot + timedelta(minutes=5):
+        if now <= deadline:
             collect(args, slot)
+        else:
+            log(args.output, slot, None, 'Çekim atlandı. Planlanan saatin üzerinden 5 dakikadan fazla geçti.')
 
 
 if __name__ == '__main__':
