@@ -55,6 +55,7 @@ const titles = {
   forecast_time: 'Saat bitişi', production_time: 'Saat bitişi', predicted_energy_kwh: 'Tahmin (kWh)',
   actual_energy_kwh: 'Gerçekleşen (kWh)', average_power_kw: 'Ortalama güç (kW)', peak_power_kw: 'Tepe güç (kW)',
   clipping_loss_kwh: 'Kırpma kaybı (kWh)', tilted_radiation: 'Işınım (W/m²)', temperature: 'Sıcaklık (°C)',
+  cell_temperature: 'Hücre sıcaklığı (°C)', wind_speed: 'Rüzgâr hızı (km/sa)', shortwave_radiation: 'Yatay ışınım (W/m²)',
   cloud_cover: 'Bulutluluk (%)', date: 'Üretim günü', hour_count: 'Saat sayısı', complete_day: 'Gün kapsamı',
   error_kwh: 'Sapma (kWh)', absolute_error_kwh: 'Mutlak hata (kWh)', percentage_deviation: 'Sapma (%)',
   first_energy_kwh: 'Birinci tahmin (kWh)', second_energy_kwh: 'İkinci tahmin (kWh)', difference_kwh: 'Fark (kWh)',
