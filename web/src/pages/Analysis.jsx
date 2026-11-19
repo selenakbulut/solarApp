@@ -50,6 +50,22 @@ export function ComparisonPage({ site, onNavigate }) {
   </div>;
 }
 
+function calculateSuccess(predicted, actual) {
+  if (!Number.isFinite(predicted) || !Number.isFinite(actual)) {
+    return null;
+  }
+
+  if (predicted < 0 || actual < 0) return null;
+
+  if (actual === 0) {
+    return predicted === 0 ? 100 : 0;
+  }
+
+  const errorPercent = Math.abs(predicted - actual) / actual * 100;
+
+  return Math.max(0, Math.min(100, 100 - errorPercent));
+}
+
 function ComparisonContent({ site, onNavigate }) {
   const runs = useApi(`/sites/${site.id}/forecasts`);
   const [selection, setSelection] = useState('');
@@ -66,8 +82,22 @@ function ComparisonContent({ site, onNavigate }) {
   </Empty>;
 
   const metrics = result?.metrics;
-  const rows = result ? (mode === 'hourly' ? result.hourly : result.daily) : [];
-  const columns = [mode === 'hourly' ? 'forecast_time' : 'date', 'predicted_energy_kwh', 'actual_energy_kwh', 'error_kwh', 'percentage_deviation'];
+  const rows = (result ? (mode === 'hourly' ? result.hourly : result.daily) : []).map(row => ({
+    ...row,
+    success_percent: calculateSuccess(row.predicted_energy_kwh, row.actual_energy_kwh),
+  }));
+  const columns = [
+    mode === 'hourly' ? 'forecast_time' : 'date',
+    'predicted_energy_kwh',
+    'actual_energy_kwh',
+    'error_kwh',
+    'percentage_deviation',
+    {
+      key: 'success_percent',
+      label: 'Başarı skoru (%)',
+      render: value => value == null ? 'Veri yok' : `%${number(value, 2)} başarılı`,
+    },
+  ];
   if (mode === 'hourly') columns.push('absolute_error_kwh', 'deviation_status');
   else columns.push('hour_count', 'complete_day');
 
@@ -105,7 +135,14 @@ function ComparisonContent({ site, onNavigate }) {
         <Panel title={mode === 'hourly' ? 'Saatlik karşılaştırma' : 'Günlük karşılaştırma'} action={<Button onClick={() => downloadCsv(rows, `comparison_${selectedRun.id}_${mode}.csv`)}><Download size={16} />CSV indir</Button>}>
           {mode === 'daily' && <Notice>Günlük toplamlar yalnız eşleşen saatlerden hesaplanır. 24 saat içermeyen üretim günleri “Kısmi gün” olarak işaretlenir.</Notice>}
           <DataTable key={`${selectedRun.id}-${mode}`} rows={rows} columns={columns} caption={mode === 'hourly' ? 'Saatlik tahmin ve gerçekleşen üretim karşılaştırması' : 'Günlük tahmin ve gerçekleşen üretim karşılaştırması'} />
-          <p className="muted">Yüzde sapma = (tahmin − gerçek) / gerçek × 100. Gerçek üretim sıfırsa yüzde hesaplanmaz; boş gösterilir.</p>
+          <p className="muted">
+            Yüzde sapma = (tahmin − gerçek) / gerçek × 100.
+            Gerçek üretim sıfırsa yüzde hesaplanmaz; boş gösterilir. </p>
+          <p className="muted">
+            {mode === 'daily' && 'Günlük başarı skoru, eşleşen saatlerin toplam tahmini ve toplam gerçek üretimi üzerinden hesaplanır. '}
+            Başarı skoru = max(0, 100 − mutlak yüzde hata).
+            Tahmin ve gerçek üretim birlikte sıfırsa skor %100'dür.
+          </p>
         </Panel>
         <Panel title="Hatanın ayrıntıları" description="Gün içindeki dağılımı, hava koşullarını ve karşılaştırma kapsamını inceleyin.">
           <details className="details">
